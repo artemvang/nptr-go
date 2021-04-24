@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -46,7 +47,7 @@ func IndexHandler(w http.ResponseWriter, r *http.Request) {
 
 func UploadFileHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseMultipartForm(10 << 20)
-	file, _, err := r.FormFile("f")
+	file, handler, err := r.FormFile("f")
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(err.Error()))
@@ -55,8 +56,7 @@ func UploadFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	defer file.Close()
 
-	fileName := ksuid.New().String()
-
+	fileName := ksuid.New().String() + filepath.Ext(handler.Filename)
 	f, err := os.OpenFile(path.Join(*Dir, fileName), os.O_WRONLY|os.O_CREATE, 0666)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
