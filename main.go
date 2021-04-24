@@ -42,12 +42,12 @@ func HealthHandler(w http.ResponseWriter, r *http.Request) {
 
 func IndexHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("curl -F'f=@file' " + *Addr))
+	w.Write([]byte("curl -F'file=@file' " + *Addr))
 }
 
 func UploadFileHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseMultipartForm(10 << 20)
-	file, handler, err := r.FormFile("f")
+	file, handler, err := r.FormFile("file")
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(err.Error()))
