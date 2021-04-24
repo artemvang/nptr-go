@@ -15,6 +15,8 @@ import (
 	"github.com/segmentio/ksuid"
 )
 
+const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024 // 1GB
+
 var (
 	Dir    *string
 	Listen *string
@@ -46,13 +48,16 @@ func IndexHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 }
 
 func UploadFileHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	r.ParseMultipartForm(0)
+	r.Body = http.MaxBytesReader(w, r.Body, MAX_UPLOAD_SIZE)
+	if err := r.ParseMultipartForm(MAX_UPLOAD_SIZE); err != nil {
+		http.Error(w, "The uploaded file is too big. Please choose an file that's less than 1GB in size", http.StatusBadRequest)
+		return
+	}
 	defer r.MultipartForm.RemoveAll()
 
 	file, handler, err := r.FormFile("f")
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -61,15 +66,13 @@ func UploadFileHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Para
 	fileName := ksuid.New().String() + filepath.Ext(handler.Filename)
 	f, err := os.OpenFile(path.Join(*Dir, fileName), os.O_WRONLY|os.O_CREATE, 0666)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer f.Close()
 
 	if _, err := io.Copy(f, file); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
