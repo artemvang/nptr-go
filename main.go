@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/hex"
 	"flag"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"log"
 	"net/http"
@@ -12,16 +14,16 @@ import (
 	"time"
 
 	"github.com/julienschmidt/httprouter"
-	"github.com/segmentio/ksuid"
 )
 
 const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024 // 1GB
 
 var (
-	Dir    *string
-	Listen *string
-	Addr   *string
-	Port   *int
+	Dir             *string
+	Listen          *string
+	Addr            *string
+	Port            *int
+	TablePolynomial *crc32.Table
 )
 
 func init() {
@@ -35,6 +37,8 @@ func init() {
 	if _, err := os.Stat(*Dir); os.IsNotExist(err) {
 		log.Fatalf("Uploads directory does not exist | %s", *Dir)
 	}
+
+	TablePolynomial = crc32.MakeTable(0xedb88320)
 }
 
 func HealthHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
@@ -63,8 +67,24 @@ func UploadFileHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Para
 
 	defer file.Close()
 
-	fileName := ksuid.New().String() + filepath.Ext(handler.Filename)
-	f, err := os.OpenFile(path.Join(*Dir, fileName), os.O_WRONLY|os.O_CREATE, 0666)
+	hash := crc32.New(TablePolynomial)
+	if _, err := io.Copy(hash, file); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	file.Seek(0, io.SeekStart)
+
+	fileName := hex.EncodeToString(hash.Sum(nil)) + filepath.Ext(handler.Filename)
+	filePath := path.Join(*Dir, fileName)
+
+	if _, err := os.Stat(filePath); err == nil {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(path.Join(*Addr, fileName)))
+		return
+	}
+
+	f, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0666)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
