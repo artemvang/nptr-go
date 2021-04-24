@@ -41,7 +41,7 @@ func HealthHandler(w http.ResponseWriter, r *http.Request) {
 
 func IndexHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("curl nptr"))
+	w.Write([]byte("curl -F'f=@file' " + *Addr))
 }
 
 func UploadFileHandler(w http.ResponseWriter, r *http.Request) {
