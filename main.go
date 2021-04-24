@@ -46,7 +46,9 @@ func IndexHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func UploadFileHandler(w http.ResponseWriter, r *http.Request) {
-	r.ParseMultipartForm(10 << 20)
+	r.ParseMultipartForm(0)
+	defer r.MultipartForm.RemoveAll()
+
 	file, handler, err := r.FormFile("f")
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
