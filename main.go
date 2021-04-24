@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/gorilla/mux"
+	"github.com/julienschmidt/httprouter"
 	"github.com/segmentio/ksuid"
 )
 
@@ -35,17 +35,17 @@ func init() {
 	}
 }
 
-func HealthHandler(w http.ResponseWriter, r *http.Request) {
+func HealthHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "ok")
 }
 
-func IndexHandler(w http.ResponseWriter, r *http.Request) {
+func IndexHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("curl -F'f=@file' " + *Addr))
 }
 
-func UploadFileHandler(w http.ResponseWriter, r *http.Request) {
+func UploadFileHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	r.ParseMultipartForm(0)
 	defer r.MultipartForm.RemoveAll()
 
@@ -79,22 +79,19 @@ func UploadFileHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("New file uploaded | %s", fileName)
 }
 
-func GetFileHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	filePath := path.Join(*Dir, vars["filename"])
+func GetFileHandler(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	filePath := path.Join(*Dir, ps.ByName("filename"))
 	http.ServeFile(w, r, filePath)
 }
 
 func main() {
-	r := mux.NewRouter()
-
-	r.HandleFunc("/health", HealthHandler)
-	r.HandleFunc("/", IndexHandler).Methods("GET")
-	r.HandleFunc("/", UploadFileHandler).Methods("POST")
-	r.HandleFunc("/{filename}", GetFileHandler)
+	router := httprouter.New()
+	router.GET("/", IndexHandler)
+	router.GET("/:filename", GetFileHandler)
+	router.POST("/", UploadFileHandler)
 
 	srv := &http.Server{
-		Handler:      r,
+		Handler:      router,
 		Addr:         *Listen + ":" + fmt.Sprint(*Port),
 		WriteTimeout: 15 * time.Second,
 		ReadTimeout:  15 * time.Second,
