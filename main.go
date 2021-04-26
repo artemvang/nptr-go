@@ -18,27 +18,27 @@ import (
 const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024 // 1GB
 
 var (
-	Dir             string
-	Listen          string
-	Addr            string
-	Port            int
+	Dir             *string
+	Listen          *string
+	Addr            *string
+	Port            *int
 	TablePolynomial *crc32.Table
 	IndexPage       string
 )
 
 func init() {
-	Dir = *flag.String("dir", "directory", "A directory to store uploaded files")
-	Port = *flag.Int("port", 8000, "Listen port")
-	Listen = *flag.String("listen", "127.0.0.1", "Listen host")
-	Addr = *flag.String("addr", "http://127.0.0.1:8000", "Service address")
+	Dir = flag.String("dir", "directory", "A directory to store uploaded files")
+	Port = flag.Int("port", 8000, "Listen port")
+	Listen = flag.String("listen", "127.0.0.1", "Listen host")
+	Addr = flag.String("addr", "http://127.0.0.1:8000", "Service address")
 
 	flag.Parse()
 
-	if _, err := os.Stat(Dir); os.IsNotExist(err) {
-		log.Fatalf("Uploads directory does not exist | %s", Dir)
+	if _, err := os.Stat(*Dir); os.IsNotExist(err) {
+		log.Fatalf("Uploads directory does not exist | %s", *Dir)
 	}
 
-	IndexPage = "curl -F'f=@f' " + Addr
+	IndexPage = "curl -F'f=@f' " + *Addr
 	TablePolynomial = crc32.MakeTable(0xedb88320)
 }
 
@@ -73,10 +73,10 @@ func UploadFileHandler(ctx *fasthttp.RequestCtx) {
 	file.Seek(0, 0)
 
 	fileName := hex.EncodeToString(hash.Sum(nil)) + filepath.Ext(fileHeader.Filename)
-	filePath := path.Join(Dir, fileName)
+	filePath := path.Join(*Dir, fileName)
 
 	if _, err := os.Stat(filePath); os.IsExist(err) {
-		ctx.SetBodyString(path.Join(Addr, fileName))
+		ctx.SetBodyString(path.Join(*Addr, fileName))
 		return
 	}
 
@@ -87,7 +87,7 @@ func UploadFileHandler(ctx *fasthttp.RequestCtx) {
 
 	defer f.Close()
 	io.Copy(f, file)
-	ctx.SetBodyString(path.Join(Addr, fileName))
+	ctx.SetBodyString(path.Join(*Addr, fileName))
 
 	logger := ctx.Logger()
 	logger.Printf("new upload - %s", fileName)
@@ -95,7 +95,7 @@ func UploadFileHandler(ctx *fasthttp.RequestCtx) {
 
 func main() {
 	fs := &fasthttp.FS{
-		Root:               Dir,
+		Root:               *Dir,
 		IndexNames:         []string{},
 		GenerateIndexPages: false,
 		Compress:           false,
@@ -120,7 +120,7 @@ func main() {
 		}
 	}
 
-	listenFull := fmt.Sprintf("%s:%d", Listen, Port)
+	listenFull := fmt.Sprintf("%s:%d", *Listen, *Port)
 	srv := &fasthttp.Server{
 		Name:               "nptr-go",
 		Handler:            requestHandler,
