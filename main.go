@@ -7,120 +7,129 @@ import (
 	"hash/crc32"
 	"io"
 	"log"
-	"net/http"
+	"mime/multipart"
 	"os"
 	"path"
 	"path/filepath"
-	"time"
 
-	"github.com/julienschmidt/httprouter"
+	"github.com/valyala/fasthttp"
 )
 
 const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024 // 1GB
 
 var (
-	Dir             *string
-	Listen          *string
-	Addr            *string
-	Port            *int
+	Dir             string
+	Listen          string
+	Addr            string
+	Port            int
 	TablePolynomial *crc32.Table
+	IndexPage       string
 )
 
 func init() {
-	Dir = flag.String("dir", "directory", "A directory to store uploaded files")
-	Port = flag.Int("port", 8000, "Listen port")
-	Listen = flag.String("listen", "127.0.0.1", "Listen host")
-	Addr = flag.String("addr", "http://127.0.0.1:8000", "Service address")
+	Dir = *flag.String("dir", "directory", "A directory to store uploaded files")
+	Port = *flag.Int("port", 8000, "Listen port")
+	Listen = *flag.String("listen", "127.0.0.1", "Listen host")
+	Addr = *flag.String("addr", "http://127.0.0.1:8000", "Service address")
 
 	flag.Parse()
 
-	if _, err := os.Stat(*Dir); os.IsNotExist(err) {
-		log.Fatalf("Uploads directory does not exist | %s", *Dir)
+	if _, err := os.Stat(Dir); os.IsNotExist(err) {
+		log.Fatalf("Uploads directory does not exist | %s", Dir)
 	}
 
+	IndexPage = "curl -F'f=@f' " + Addr
 	TablePolynomial = crc32.MakeTable(0xedb88320)
 }
 
-func HealthHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "ok")
+func IndexHandler(ctx *fasthttp.RequestCtx) {
+	ctx.SetBodyString(IndexPage)
 }
 
-func IndexHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("curl -F'f=@f' " + *Addr))
-}
+func UploadFileHandler(ctx *fasthttp.RequestCtx) {
+	var (
+		file multipart.File
+		f    *os.File
+	)
 
-func UploadFileHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	r.Body = http.MaxBytesReader(w, r.Body, MAX_UPLOAD_SIZE)
-	if err := r.ParseMultipartForm(MAX_UPLOAD_SIZE); err != nil {
-		http.Error(w, "The uploaded file is too big. Please choose an file that's less than 1GB in size", http.StatusBadRequest)
-		return
-	}
-	defer r.MultipartForm.RemoveAll()
-
-	file, handler, err := r.FormFile("f")
+	fileHeader, err := ctx.FormFile("f")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		ctx.Error(err.Error(), fasthttp.StatusBadRequest)
 		return
 	}
 
+	if file, err = fileHeader.Open(); err != nil {
+		ctx.Error(err.Error(), fasthttp.StatusBadRequest)
+		return
+	}
 	defer file.Close()
 
 	hash := crc32.New(TablePolynomial)
 	if _, err := io.Copy(hash, file); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		ctx.Error(err.Error(), fasthttp.StatusInternalServerError)
 		return
 	}
 
-	file.Seek(0, io.SeekStart)
+	file.Seek(0, 0)
 
-	fileName := hex.EncodeToString(hash.Sum(nil)) + filepath.Ext(handler.Filename)
-	filePath := path.Join(*Dir, fileName)
+	fileName := hex.EncodeToString(hash.Sum(nil)) + filepath.Ext(fileHeader.Filename)
+	filePath := path.Join(Dir, fileName)
 
-	if _, err := os.Stat(filePath); err == nil {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(path.Join(*Addr, fileName)))
+	if _, err := os.Stat(filePath); os.IsExist(err) {
+		ctx.SetBodyString(path.Join(Addr, fileName))
 		return
 	}
 
-	f, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0666)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if f, err = os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0666); err != nil {
+		ctx.Error(err.Error(), fasthttp.StatusInternalServerError)
 		return
 	}
+
 	defer f.Close()
+	io.Copy(f, file)
+	ctx.SetBodyString(path.Join(Addr, fileName))
 
-	if _, err := io.Copy(f, file); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(path.Join(*Addr, fileName)))
-
-	log.Printf("New file uploaded | %s", fileName)
-}
-
-func GetFileHandler(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-	filePath := path.Join(*Dir, ps.ByName("filename"))
-	http.ServeFile(w, r, filePath)
+	logger := ctx.Logger()
+	logger.Printf("new upload - %s", fileName)
 }
 
 func main() {
-	router := httprouter.New()
-	router.GET("/", IndexHandler)
-	router.GET("/:filename", GetFileHandler)
-	router.POST("/", UploadFileHandler)
-
-	srv := &http.Server{
-		Handler:      router,
-		Addr:         *Listen + ":" + fmt.Sprint(*Port),
-		WriteTimeout: 15 * time.Second,
-		ReadTimeout:  15 * time.Second,
+	fs := &fasthttp.FS{
+		Root:               Dir,
+		IndexNames:         []string{},
+		GenerateIndexPages: false,
+		Compress:           false,
+		AcceptByteRange:    true,
 	}
 
-	log.Printf("Server started listening on %s", srv.Addr)
+	fsHandler := fs.NewRequestHandler()
 
-	log.Fatal(srv.ListenAndServe())
+	requestHandler := func(ctx *fasthttp.RequestCtx) {
+		switch string(ctx.Path()) {
+		case "/status":
+			ctx.SetBodyString("ok")
+		case "/":
+			switch method := string(ctx.Method()); method {
+			case "GET":
+				IndexHandler(ctx)
+			case "POST":
+				UploadFileHandler(ctx)
+			}
+		default:
+			fsHandler(ctx)
+		}
+	}
+
+	listenFull := fmt.Sprintf("%s:%d", Listen, Port)
+	srv := &fasthttp.Server{
+		Name:               "nptr-go",
+		Handler:            requestHandler,
+		MaxRequestBodySize: MAX_UPLOAD_SIZE,
+	}
+
+	log.Printf("Server started listening on %s", listenFull)
+
+	if err := srv.ListenAndServe(listenFull); err != nil {
+		log.Panic(err)
+	}
 }
