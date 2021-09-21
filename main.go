@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"mime/multipart"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -20,17 +21,19 @@ const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024 // 1GB
 var (
 	Dir             *string
 	Listen          *string
-	Addr            *string
+	AddrURL         *url.URL
 	Port            *int
 	TablePolynomial *crc32.Table
 	IndexPage       string
 )
 
 func init() {
+	var err error
 	Dir = flag.String("dir", "directory", "A directory to store uploaded files")
 	Port = flag.Int("port", 8000, "Listen port")
 	Listen = flag.String("listen", "127.0.0.1", "Listen host")
-	Addr = flag.String("addr", "http://127.0.0.1:8000", "Service address")
+
+	addr := flag.String("addr", "http://127.0.0.1:8000", "Service address")
 
 	flag.Parse()
 
@@ -38,7 +41,12 @@ func init() {
 		log.Fatalf("Uploads directory does not exist | %s", *Dir)
 	}
 
-	IndexPage = "curl -F'f=@f' " + *Addr
+	AddrURL, err = url.Parse(*addr)
+	if err != nil {
+		log.Fatalf("Provided invalid url | %s", *addr)
+	}
+
+	IndexPage = "curl -F'f=@f' " + *addr
 	TablePolynomial = crc32.MakeTable(0xedb88320)
 }
 
@@ -75,8 +83,11 @@ func UploadFileHandler(ctx *fasthttp.RequestCtx) {
 	fileName := hex.EncodeToString(hash.Sum(nil)) + filepath.Ext(fileHeader.Filename)
 	filePath := path.Join(*Dir, fileName)
 
+	u, _ := url.Parse(AddrURL.String())
+	u.Path = path.Join(u.Path, fileName)
+
 	if _, err := os.Stat(filePath); os.IsExist(err) {
-		ctx.SetBodyString(path.Join(*Addr, fileName))
+		ctx.SetBodyString(u.String())
 		return
 	}
 
@@ -87,7 +98,7 @@ func UploadFileHandler(ctx *fasthttp.RequestCtx) {
 
 	defer f.Close()
 	io.Copy(f, file)
-	ctx.SetBodyString(path.Join(*Addr, fileName))
+	ctx.SetBodyString(u.String())
 
 	logger := ctx.Logger()
 	logger.Printf("new upload - %s", fileName)
@@ -106,7 +117,7 @@ func main() {
 
 	requestHandler := func(ctx *fasthttp.RequestCtx) {
 		switch string(ctx.Path()) {
-		case "/status":
+		case "/health":
 			ctx.SetBodyString("ok")
 		case "/":
 			switch method := string(ctx.Method()); method {
