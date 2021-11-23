@@ -3,11 +3,11 @@ package main
 import (
 	"encoding/hex"
 	"flag"
-	"fmt"
 	"hash/crc32"
 	"io"
 	"log"
 	"mime/multipart"
+	"net"
 	"net/url"
 	"os"
 	"path"
@@ -20,9 +20,8 @@ const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024 // 1GB
 
 var (
 	Dir             *string
-	Listen          *string
+	Socket          *string
 	AddrURL         *url.URL
-	Port            *int
 	TablePolynomial *crc32.Table
 	IndexPage       string
 )
@@ -30,8 +29,7 @@ var (
 func init() {
 	var err error
 	Dir = flag.String("dir", "directory", "A directory to store uploaded files")
-	Port = flag.Int("port", 8000, "Listen port")
-	Listen = flag.String("listen", "127.0.0.1", "Listen host")
+	Socket = flag.String("socket", "/run/nptr.sock", "Listen socket")
 
 	addr := flag.String("addr", "http://127.0.0.1:8000", "Service address")
 
@@ -131,16 +129,21 @@ func main() {
 		}
 	}
 
-	listenFull := fmt.Sprintf("%s:%d", *Listen, *Port)
 	srv := &fasthttp.Server{
 		Name:               "nptr-go",
 		Handler:            requestHandler,
 		MaxRequestBodySize: MAX_UPLOAD_SIZE,
 	}
 
-	log.Printf("Server started listening on %s", listenFull)
+	ln, err := net.Listen("unix", *Socket)
+	if err != nil {
+		log.Panic(err)
+	}
+	defer ln.Close()
 
-	if err := srv.ListenAndServe(listenFull); err != nil {
+	log.Printf("Server started listening on %s", *Socket)
+
+	if err := srv.Serve(ln); err != nil {
 		log.Panic(err)
 	}
 }
