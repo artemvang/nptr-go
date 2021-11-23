@@ -137,9 +137,13 @@ func main() {
 
 	ln, err := net.Listen("unix", *Socket)
 	if err != nil {
-		log.Panic(err)
+		log.Fatal(err)
 	}
 	defer ln.Close()
+
+	if err := os.Chmod(*Socket, 0770); err != nil {
+		log.Fatal(err)
+	}
 
 	log.Printf("Server started listening on %s", *Socket)
 
