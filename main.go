@@ -139,9 +139,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() {
+		ln.Close()
+		os.Remove(*Socket)
+	}()
 
-	if err := os.Chmod(*Socket, 0770); err != nil {
+	if err = os.Chmod(*Socket, 0775); err != nil {
 		log.Fatal(err)
 	}
 
