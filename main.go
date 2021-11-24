@@ -136,6 +136,11 @@ func main() {
 		MaxRequestBodySize: MAX_UPLOAD_SIZE,
 	}
 
+	err := syscall.Unlink(*Socket)
+	if err != nil {
+		log.Print("Unlink()", err)
+	}
+
 	ln, err := net.Listen("unix", *Socket)
 	if err != nil {
 		log.Fatal(err)
@@ -143,15 +148,6 @@ func main() {
 	defer ln.Close()
 
 	if err = os.Chmod(*Socket, 0775); err != nil {
-		log.Fatal(err)
-	}
-
-	file, err := ln.(*net.TCPListener).File()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	if err = syscall.SetsockoptInt(int(file.Fd()), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
 		log.Fatal(err)
 	}
 
