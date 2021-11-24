@@ -12,6 +12,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"syscall"
 
 	"github.com/valyala/fasthttp"
 )
@@ -139,12 +140,18 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer func() {
-		ln.Close()
-		os.Remove(*Socket)
-	}()
+	defer ln.Close()
 
 	if err = os.Chmod(*Socket, 0775); err != nil {
+		log.Fatal(err)
+	}
+
+	file, err := ln.(*net.TCPListener).File()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if err = syscall.SetsockoptInt(int(file.Fd()), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
 		log.Fatal(err)
 	}
 
